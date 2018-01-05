@@ -341,8 +341,9 @@ class Trainer(object):
         
         self.norm_gradients_node = tf.Variable(tf.constant(0.0, shape=[len(self.net.gradients_node)]))
         
+        self.summaries = {}
         if self.net.summaries and self.norm_grads:
-            tf.summary.histogram('norm_grads', self.norm_gradients_node)
+            self.summaries['norm_grads'] = tf.summary.histogram('norm_grads', self.norm_gradients_node)
 
         self.summaries['loss'] = tf.summary.scalar('loss', self.net.cost)
         self.summaries['crossentropy'] = tf.summary.scalar('crossentropy', self.net.cross_entropy)
@@ -492,14 +493,22 @@ class Trainer(object):
     def output_minibatch_stats(self, sess, summary_writer, step, batch_x, batch_y):
         # Calculate batch loss and accuracy
         summary_str, loss, acc, predictions = sess.run([self.summary_op, 
-                                                            self.net.cost, 
-                                                            self.net.accuracy, 
+                                                            self.summaries["loss"],
+                                                            self.summaries["accuracy"],
                                                             self.net.predicter], 
                                                            feed_dict={self.net.x: batch_x,
                                                                       self.net.y: batch_y,
                                                                       self.net.keep_prob: 1.})
         summary_writer.add_summary(summary_str, step)
+        summary_proto = tf.Summary()
+        summary_proto.ParseFromString(summary_str)
+        print(summary_proto)
+
         summary_writer.flush()
+        print(step,
+            loss,
+            acc,
+            error_rate(predictions, batch_y))
         logging.info("Iter {:}, Minibatch Loss= {:.4f}, Training Accuracy= {:.4f}, Minibatch error= {:.1f}%"
                      .format(step,
                             loss,
