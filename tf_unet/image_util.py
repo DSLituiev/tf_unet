@@ -20,6 +20,7 @@ from __future__ import print_function, division, absolute_import, unicode_litera
 import glob
 import numpy as np
 from PIL import Image
+from cocohacks import read_roi_to_sparse
 
 class BaseDataProvider(object):
     """
@@ -54,8 +55,12 @@ class BaseDataProvider(object):
         nx = train_data.shape[1]
         ny = train_data.shape[0]
 
-        return train_data.reshape(1, ny, nx, self.channels), labels.reshape(1, ny, nx, self.n_class),
-    
+        train_data = train_data.reshape(1, ny, nx, self.channels)
+        labels = labels.reshape(1, ny, nx, self.n_class)
+ 
+        return train_data, labels    
+
+
     def _process_labels(self, label):
         if self.n_class == 2:
             nx = label.shape[1]
@@ -150,8 +155,12 @@ class ImageDataProvider(BaseDataProvider):
     
     """
     
-    def __init__(self, search_path, a_min=None, a_max=None, data_suffix=".tif", mask_suffix='_mask.tif', shuffle_data=True, n_class = 2):
+    def __init__(self, search_path, roidict, a_min=None, a_max=None,
+                 data_suffix=".png", mask_suffix='.json',
+                 shuffle_data=True, n_class = 2,
+                 ):
         super(ImageDataProvider, self).__init__(a_min, a_max)
+        self.roidict = roidict
         self.data_suffix = data_suffix
         self.mask_suffix = mask_suffix
         self.file_idx = -1
@@ -185,6 +194,7 @@ class ImageDataProvider(BaseDataProvider):
             if self.shuffle_data:
                 np.random.shuffle(self.data_files)
         
+
     def _next_data(self):
         self._cylce_file()
         image_name = self.data_files[self.file_idx]
@@ -192,5 +202,6 @@ class ImageDataProvider(BaseDataProvider):
         
         img = self._load_file(image_name, np.float32)
         label = self._load_file(label_name, np.bool)
+        label = read_roi_to_sparse(label_name, self.roidict)
     
         return img,label

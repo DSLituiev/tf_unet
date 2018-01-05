@@ -344,12 +344,16 @@ class Trainer(object):
         if self.net.summaries and self.norm_grads:
             tf.summary.histogram('norm_grads', self.norm_gradients_node)
 
-        tf.summary.scalar('loss', self.net.cost)
-        tf.summary.scalar('cross_entropy', self.net.cross_entropy)
-        tf.summary.scalar('accuracy', self.net.accuracy)
+        self.summaries['loss'] = tf.summary.scalar('loss', self.net.cost)
+        self.summaries['crossentropy'] = tf.summary.scalar('crossentropy', self.net.cross_entropy)
+        self.summaries['accuracy'] = tf.summary.scalar('accuracy', self.net.accuracy)
+
+        self.summaries['val_loss'] = tf.summary.scalar('val_loss', self.net.cost)
+        self.summaries['val_crossentropy'] = tf.summary.scalar('val_crossentropy', self.net.cross_entropy)
+        self.summaries['val_accuracy'] = tf.summary.scalar('val_accuracy', self.net.accuracy)
 
         self.optimizer = self._get_optimizer(training_iters, global_step)
-        tf.summary.scalar('learning_rate', self.learning_rate_node)
+        self.summaries['learning_rate'] = tf.summary.scalar('learning_rate', self.learning_rate_node)
 
         self.summary_op = tf.summary.merge_all()        
         init = tf.global_variables_initializer()
@@ -374,7 +378,11 @@ class Trainer(object):
         
         return init
 
-    def train(self, data_provider, output_path, training_iters=10, epochs=100, dropout=0.75, display_step=1, restore=False, write_graph=False, prediction_path = 'prediction'):
+    def train(self, data_provider, output_path, training_iters=10,
+              epochs=100, dropout=0.75, display_step=1, restore=False,
+              write_graph=False, prediction_path = 'prediction',
+              val_data_provider = None,
+              ):
         """
         Lauches the training process
         
@@ -418,8 +426,9 @@ class Trainer(object):
                     batch_x, batch_y = data_provider(self.batch_size)
                      
                     # Run optimization op (backprop)
-                    _, loss, lr, gradients = sess.run((self.optimizer, self.net.cost, self.learning_rate_node, self.net.gradients_node), 
-                                                      feed_dict={self.net.x: batch_x,
+                    _, loss, lr, gradients = sess.run((self.optimizer, self.net.cost,
+                                                       self.learning_rate_node, self.net.gradients_node), 
+                                                       feed_dict={self.net.x: batch_x,
                                                                  self.net.y: util.crop_to_shape(batch_y, pred_shape),
                                                                  self.net.keep_prob: dropout})
 
@@ -434,13 +443,22 @@ class Trainer(object):
                     total_loss += loss
 
                 self.output_epoch_stats(epoch, total_loss, training_iters, lr)
-                self.store_prediction(sess, test_x, test_y, "epoch_%s"%epoch)
+                #self.store_prediction(sess, test_x, test_y, "epoch_%s"%epoch)
+                predictions = self.output_minibatch_stats(sess, summary_writer, step,
+                                                          test_x, util.crop_to_shape(test_y, pred_shape))
                     
                 save_path = self.net.save(sess, save_path)
             logging.info("Optimization Finished!")
             
             return save_path
         
+    def eval(self):
+        loss, = sess.run((self.net.cost,
+                                       ), 
+                                       feed_dict={self.net.x: batch_x,
+                                                 self.net.y: util.crop_to_shape(batch_y, pred_shape),
+                                                 self.net.keep_prob: 1.0})
+
     def store_prediction(self, sess, batch_x, batch_y, name):
         prediction = sess.run(self.net.predicter, feed_dict={self.net.x: batch_x, 
                                                              self.net.y: batch_y, 
@@ -451,11 +469,18 @@ class Trainer(object):
                                                        self.net.y: util.crop_to_shape(batch_y, pred_shape), 
                                                        self.net.keep_prob: 1.})
         
-        logging.info("Verification error= {:.1f}%, loss= {:.4f}".format(error_rate(prediction,
-                                                                          util.crop_to_shape(batch_y,
-                                                                                             prediction.shape)),
-                                                                          loss))
+        logging.info("Verification error= {:.1f}%, loss= {:.4f}"
+                    .format(error_rate(prediction,
+                                       util.crop_to_shape(batch_y,
+                                                         prediction.shape)),
+                                       loss))
               
+        print("batch_x", batch_x.shape)
+        print("batch_y", batch_y.shape)
+        print("prediction", prediction.shape)
+        if batch_x.shape[-1] != batch_y.shape[-1]:
+            logging.warn("image and label have different number of channels")
+            return pred_shape
         img = util.combine_img_prediction(batch_x, batch_y, prediction)
         util.save_image(img, "%s/%s.jpg"%(self.prediction_path, name))
         
@@ -475,10 +500,13 @@ class Trainer(object):
                                                                       self.net.keep_prob: 1.})
         summary_writer.add_summary(summary_str, step)
         summary_writer.flush()
-        logging.info("Iter {:}, Minibatch Loss= {:.4f}, Training Accuracy= {:.4f}, Minibatch error= {:.1f}%".format(step,
-                                                                                                            loss,
-                                                                                                            acc,
-                                                                                                            error_rate(predictions, batch_y)))
+        logging.info("Iter {:}, Minibatch Loss= {:.4f}, Training Accuracy= {:.4f}, Minibatch error= {:.1f}%"
+                     .format(step,
+                            loss,
+                            acc,
+                            error_rate(predictions, batch_y))
+                     )
+        return predictions 
 
 def _update_avg_gradients(avg_gradients, gradients, step):
     if avg_gradients is None:
