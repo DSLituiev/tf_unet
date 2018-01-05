@@ -19,6 +19,11 @@ author: dslituiev
 '''
 from __future__ import print_function, division, absolute_import, unicode_literals
 import os
+os.environ["PYTHONHASHSEED"]='0'
+os.environ['KERAS_BACKEND'] = 'tensorflow'
+os.environ['CUDA_HOME'] = '/usr/local/cuda-8.0'
+os.environ["CUDA_VISIBLE_DEVICES"] = '2'
+
 import click
 
 from tf_unet import unet
@@ -26,6 +31,7 @@ from tf_unet import util
 
 from scripts.kidney_util import ImageDataProvider
 import yaml
+import numpy as np
 
 def create_training_path(output_path):
     idx = 0
@@ -36,8 +42,8 @@ def create_training_path(output_path):
     return path
 
 @click.command()
-@click.option('--data_root', default="./ufig_images/1.h5")
-@click.option('--roidictfile', default="/Users/dlituiev/repos/kidney_histopath/slideslicer/tissuedict.yaml")
+@click.option('--data_root', default="../../data/data_1024/nosplit")
+@click.option('--roidictfile', default="../../data/tissuedict.yaml")
 @click.option('--output_path', default="./unet_trained_kidney")
 @click.option('--training_iters', default=20)
 @click.option('--epochs', default=10)
@@ -53,6 +59,9 @@ def launch(data_root, roidictfile, output_path, training_iters,
     data_provider = ImageDataProvider(data_root, roidict)
     
     data, label = data_provider(1)
+    # make sure the labels are not flat
+    assert np.any(np.asarray([label[-1,...,nn].var() for nn in range(label.shape[-1])]) >0)
+
     weights = None#(1/3) / (label.sum(axis=2).sum(axis=1).sum(axis=0) / data.size)
     
     net = unet.Unet(channels=data_provider.channels, 
@@ -79,4 +88,3 @@ def launch(data_root, roidictfile, output_path, training_iters,
 
 if __name__ == '__main__':
     launch()
-

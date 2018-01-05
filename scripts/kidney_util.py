@@ -61,6 +61,7 @@ class ImageDataProvider(BaseDataProvider):
         self.file_idx = -1
         self.shuffle_data = shuffle_data
         self.n_class = 1 + max(roidict.values()) 
+        print("NUMBER OF CLASSES:", self.n_class)
         
         self.data_files = self._find_data_files(search_path)
         
