@@ -19,12 +19,15 @@ author: jakeret
 '''
 from __future__ import print_function, division, absolute_import, unicode_literals
 
+from protobuf_to_dict import protobuf_to_dict
+
 import os
 import shutil
 import numpy as np
 from collections import OrderedDict
 import logging
 
+import pickle
 import tensorflow as tf
 
 from tf_unet import util
@@ -403,6 +406,10 @@ class Trainer(object):
         
         init = self._initialize(training_iters, output_path, restore, prediction_path)
         
+        if training_iters is None:
+            training_iters = np.ceil( len(data_provider.data_files) / self.batch_size)
+            print("training_iters", training_iters)
+
         with tf.Session() as sess:
             if write_graph:
                 tf.train.write_graph(sess.graph_def, output_path, "graph.pb", False)
@@ -414,8 +421,9 @@ class Trainer(object):
                 if ckpt and ckpt.model_checkpoint_path:
                     self.net.restore(sess, ckpt.model_checkpoint_path)
             
-            test_x, test_y = data_provider(self.verification_batch_size)
-            pred_shape = self.store_prediction(sess, test_x, test_y, "_init")
+            if val_data_provider is None:
+                test_x, test_y = data_provider(self.verification_batch_size)
+                pred_shape = self.store_prediction(sess, test_x, test_y, "_init")
             
             summary_writer = tf.summary.FileWriter(output_path, graph=sess.graph)
             logging.info("Start optimization")
@@ -430,7 +438,8 @@ class Trainer(object):
                     _, loss, lr, gradients = sess.run((self.optimizer, self.net.cost,
                                                        self.learning_rate_node, self.net.gradients_node), 
                                                        feed_dict={self.net.x: batch_x,
-                                                                 self.net.y: util.crop_to_shape(batch_y, pred_shape),
+                                                                 self.net.y: batch_y, 
+                                                                 # util.crop_to_shape(batch_y, pred_shape),
                                                                  self.net.keep_prob: dropout})
 
                     if self.net.summaries and self.norm_grads:
@@ -446,7 +455,8 @@ class Trainer(object):
                 self.output_epoch_stats(epoch, total_loss, training_iters, lr)
                 #self.store_prediction(sess, test_x, test_y, "epoch_%s"%epoch)
                 predictions = self.output_minibatch_stats(sess, summary_writer, step,
-                                                          test_x, util.crop_to_shape(test_y, pred_shape))
+                                                          test_x, util.crop_to_shape(test_y, pred_shape),
+                                                          exclude_val=False)
                     
                 save_path = self.net.save(sess, save_path)
             logging.info("Optimization Finished!")
@@ -490,7 +500,7 @@ class Trainer(object):
     def output_epoch_stats(self, epoch, total_loss, training_iters, lr):
         logging.info("Epoch {:}, Average loss: {:.4f}, learning rate: {:.4f}".format(epoch, (total_loss / training_iters), lr))
     
-    def output_minibatch_stats(self, sess, summary_writer, step, batch_x, batch_y):
+    def output_minibatch_stats(self, sess, summary_writer, step, batch_x, batch_y, exclude_val=True):
         # Calculate batch loss and accuracy
         summary_str, loss, acc, predictions = sess.run([self.summary_op, 
                                                             self.summaries["loss"],
@@ -502,9 +512,25 @@ class Trainer(object):
         summary_writer.add_summary(summary_str, step)
         summary_proto = tf.Summary()
         summary_proto.ParseFromString(summary_str)
-        print(summary_proto)
+        #with open("summary_proto_ex", 'wb+') as fh:
+        #    pickle.dump(summary_proto, fh)
 
         summary_writer.flush()
+        summary_dict = protobuf_to_dict(summary_proto)
+        scalar_summaries = [vv for vv in summary_dict["value"] if 'simple_value' in  vv]
+        if exclude_val:
+            scalar_summaries = [(sc["tag"], sc["simple_value"]) for sc in scalar_summaries if not
+                                                                sc["tag"].startswith('val_')]
+        else:
+            scalar_summaries = [(sc["tag"], sc["simple_value"]) for sc in scalar_summaries]
+
+        logging.info(
+                    "\t".join(["{}:\t{:.4f}".format(*sc) if type(sc[1]) is float else 
+                               "{}:\t{}".format(*sc) for sc in scalar_summaries])
+                    )
+
+
+        """
         print(step,
             loss,
             acc,
@@ -515,6 +541,7 @@ class Trainer(object):
                             acc,
                             error_rate(predictions, batch_y))
                      )
+        """
         return predictions 
 
 def _update_avg_gradients(avg_gradients, gradients, step):

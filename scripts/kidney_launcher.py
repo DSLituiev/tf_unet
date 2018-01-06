@@ -42,7 +42,9 @@ def create_training_path(output_path):
     return path
 
 @click.command()
-@click.option('--data_root', default="../../data/data_1024/nosplit")
+#@click.option('--data_root', default="../../data/data_1024/nosplit")
+@click.option('--data-root', default="../../data/data_256_subsample_4x/fullsplit/open_glom")
+@click.option('--val', default="../../data/data_256_subsample_4x/fullsplit/open_glom+infl")
 @click.option('--roidictfile', default="../../data/tissuedict.yaml")
 @click.option('--output_path', default="./unet_trained_kidney")
 @click.option('--training_iters', default=20)
@@ -52,10 +54,13 @@ def create_training_path(output_path):
 @click.option('--features_root', default=16)
 
 def launch(data_root, roidictfile, output_path, training_iters,
-           epochs, restore, layers, features_root):
+           epochs, restore, layers, features_root, val=None):
     
     with open(roidictfile) as fh:
         roidict = yaml.load(fh)
+    if val:
+        val_data_provider = ImageDataProvider(val, roidict)
+
     data_provider = ImageDataProvider(data_root, roidict)
     
     data, label = data_provider(1)
@@ -79,7 +84,8 @@ def launch(data_root, roidictfile, output_path, training_iters,
                          epochs=epochs, 
                          dropout=0.5, 
                          display_step=2, 
-                         restore=restore)
+                         restore=restore,
+                         val_data_provider=val_data_provider)
      
     prediction = net.predict(path, data)
      
